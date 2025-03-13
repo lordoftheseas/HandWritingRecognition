@@ -79,64 +79,67 @@ def preprocess():
 
     # Split the training sets into two sets of 50000 randomly sampled training examples and 10000 validation examples. 
     # Your code here.
-    
-    #init vars
-    train_data = np.zeros((0, 784))
-    train_label = np.zeros((0, 10))
+    train_data = np.zeros((0, 784)) #init empty arrays
+    train_label = np.zeros(0)
     validation_data = np.zeros((0, 784))
-    validation_label = np.zeros((0, 10))
+    validation_label = np.zeros(0)
     test_data = np.zeros((0, 784))
-    test_label = np.zeros((0, 10))
+    test_label = np.zeros(0)
     
-    #process each digit
+    train_size = 0 #count train samples
+    val_size = 0 #count val samples
+    
+    #process each digit (0-9)
     for i in range(10):
-        #get training data for digit
-        digit_train = mat['train'+str(i)]
+        digit_train = mat['train' + str(i)]
+        n_samples = digit_train.shape[0]
         
-        #create one-hot labels
-        digit_train_labels = np.zeros((digit_train.shape[0], 10))
-        digit_train_labels[:, i] = 1
+        #shuffle data randomly
+        idx = np.random.permutation(n_samples)
+        digit_train = digit_train[idx]
         
-        #split train/validation (80% train, 20% validation)
-        n_validation = int(0.2 * digit_train.shape[0])
+        #calc split ratio to get ~50000 train examples
+        train_idx = min(int(n_samples * 0.8), 50000 - train_size)
         
-        #add to final datasets
-        train_data = np.vstack((train_data, digit_train[n_validation:]))
-        train_label = np.vstack((train_label, digit_train_labels[n_validation:]))
-        validation_data = np.vstack((validation_data, digit_train[:n_validation]))
-        validation_label = np.vstack((validation_label, digit_train_labels[:n_validation]))
+        #split into train/val
+        train_portion = digit_train[:train_idx]
+        val_portion = digit_train[train_idx:]
         
-        #process test data for digit
-        digit_test = mat['test'+str(i)]
-        digit_test_labels = np.zeros((digit_test.shape[0], 10))
-        digit_test_labels[:, i] = 1
+        #update counts
+        train_size += train_portion.shape[0]
+        val_size += val_portion.shape[0]
         
-        test_data = np.vstack((test_data, digit_test))
-        test_label = np.vstack((test_label, digit_test_labels))
+        #add to datasets
+        train_data = np.vstack((train_data, train_portion))
+        train_label = np.append(train_label, np.ones(train_portion.shape[0]) * i)
+        
+        validation_data = np.vstack((validation_data, val_portion))
+        validation_label = np.append(validation_label, np.ones(val_portion.shape[0]) * i)
+        
+        #add test data
+        test_digit = mat['test' + str(i)]
+        test_data = np.vstack((test_data, test_digit))
+        test_label = np.append(test_label, np.ones(test_digit.shape[0]) * i)
 
     # Feature selection
     # Your code here.
-    #find non-constant features
-    all_data = np.vstack((train_data, validation_data, test_data))
-    selected_features = []
+    #find non-repetitive features
+    std_dev = np.std(train_data, axis=0)
+    selected_features = np.where(std_dev > 0)[0]
     
-    for i in range(all_data.shape[1]):
-        if np.std(all_data[:, i]) > 0:
-            selected_features.append(i)
-    
-    #keep only selected features
+    #apply feature selection
     train_data = train_data[:, selected_features]
     validation_data = validation_data[:, selected_features]
     test_data = test_data[:, selected_features]
     
-    #normalize data
+    #normalize data to [0,1]
     train_data = train_data / 255.0
     validation_data = validation_data / 255.0
     test_data = test_data / 255.0
 
     print('preprocess done')
 
-    return train_data, train_label, validation_data, validation_label, test_data, test_label, selected_features
+    return train_data, train_label, validation_data, validation_label, test_data, test_label
 
 ####################################################################################################################
 
@@ -198,51 +201,56 @@ def nnObjFunction(params, *args):
     obj_val = 0
 
     # Your code here
-    #
-    #
-    #
-    #
-    #
-    #get num training samples
-    n = training_data.shape[0]
+    n = training_data.shape[0] #num of samples
     
-    #add bias to training data
-    training_data_bias = np.hstack((training_data, np.ones((n, 1))))
+    #add bias to input
+    input_bias = np.hstack((training_data, np.ones((n, 1))))
     
-    #forward propagation - hidden layer
-    a = np.dot(training_data_bias, w1.T)
-    z = sigmoid(a)
-    z_bias = np.hstack((z, np.ones((n, 1))))
+    #forward pass: input->hidden
+    a1 = np.dot(input_bias, w1.T) #calc linear combo
+    z1 = sigmoid(a1) #apply activation
     
-    #forward propagation - output layer
-    b = np.dot(z_bias, w2.T)
-    o = sigmoid(b)
+    #add bias to hidden layer
+    z1_bias = np.hstack((z1, np.ones((n, 1))))
     
-    #calculate error (negative log-likelihood)
-    y = training_label
-    error_term = -y * np.log(o) - (1 - y) * np.log(1 - o)
-    obj_val = np.sum(error_term) / n
+    #forward pass: hidden->output
+    a2 = np.dot(z1_bias, w2.T) #calc linear combo
+    output = sigmoid(a2) #apply activation
     
-    #add regularization term
-    obj_val += (lambdaval / (2 * n)) * (np.sum(w1 * w1) + np.sum(w2 * w2))
+    #convert labels to one-hot
+    y = np.zeros((n, n_class))
+    for i in range(n):
+        y[i, int(training_label[i])] = 1
     
-    #backpropagation - calculate gradients
-    delta_output = o - y
-    grad_w2 = np.dot(delta_output.T, z_bias) / n
+    #calc error (neg log likelihood)
+    error = -np.sum(y * np.log(output) + (1 - y) * np.log(1 - output)) / n
     
-    delta_hidden = np.dot(delta_output, w2) * z_bias * (1 - z_bias)
-    delta_hidden = delta_hidden[:, :-1]
-    grad_w1 = np.dot(delta_hidden.T, training_data_bias) / n
+    #add regularization
+    reg = (lambdaval / (2 * n)) * (np.sum(np.square(w1)) + np.sum(np.square(w2)))
     
-    #add regularization to gradients
-    grad_w1 += (lambdaval / n) * w1
-    grad_w2 += (lambdaval / n) * w2
-
+    #total objective val
+    obj_val = error + reg
+    
+    #backpropagation
+    #output layer error
+    delta2 = output - y
+    
+    #calc w2 gradient
+    grad_w2 = np.dot(delta2.T, z1_bias) / n
+    grad_w2 += (lambdaval / n) * w2 #add reg
+    
+    #hidden layer error
+    delta1 = np.dot(delta2, w2) * (z1_bias * (1 - z1_bias))
+    delta1 = delta1[:, :-1] #remove bias term gradient
+    
+    #calc w1 gradient
+    grad_w1 = np.dot(delta1.T, input_bias) / n
+    grad_w1 += (lambdaval / n) * w1 #add reg
 
     # Make sure you reshape the gradient matrices to a 1D array. for instance if your gradient matrices are grad_w1 and grad_w2
     # you would use code similar to the one below to create a flat array
     # obj_grad = np.concatenate((grad_w1.flatten(), grad_w2.flatten()),0)
-    obj_grad = np.concatenate((grad_w1.flatten(), grad_w2.flatten()),0)
+    obj_grad = np.concatenate((grad_w1.flatten(), grad_w2.flatten()), 0)
 
     return (obj_val, obj_grad)
 
@@ -280,19 +288,24 @@ def nnPredict(w1, w2, data):
 
     labels = np.array([])
     # Your code here
-    #add bias to data
-    n = data.shape[0]
+    n = data.shape[0] #num of samples
+    
+    #add bias to input
     data_bias = np.hstack((data, np.ones((n, 1))))
     
-    #forward pass - hidden layer
-    z = sigmoid(np.dot(data_bias, w1.T))
-    z_bias = np.hstack((z, np.ones((n, 1))))
+    #forward pass: input->hidden
+    hidden_in = np.dot(data_bias, w1.T)
+    hidden_out = sigmoid(hidden_in)
     
-    #forward pass - output layer
-    o = sigmoid(np.dot(z_bias, w2.T))
+    #add bias to hidden
+    hidden_bias = np.hstack((hidden_out, np.ones((n, 1))))
     
-    #get prediction (highest probability class)
-    labels = np.argmax(o, axis=1)
+    #forward pass: hidden->output
+    output_in = np.dot(hidden_bias, w2.T)
+    output = sigmoid(output_in)
+    
+    #get predicted class (max activation)
+    labels = np.argmax(output, axis=1)
 
     return labels
 
@@ -372,5 +385,4 @@ if __name__ == "__main__":
     # find the accuracy on Validation Dataset
 
     print('\n Test set Accuracy:' + str(100 * np.mean((predicted_label == test_label).astype(float))) + '%')
-
 
